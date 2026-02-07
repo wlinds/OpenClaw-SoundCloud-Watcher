@@ -2,220 +2,139 @@
 
 Monitor your SoundCloud account and track artist releases. Get notified when someone follows you, likes your tracks, or when artists you care about drop new music.
 
-
 ## Features
 
 - **Follower tracking** - See who followed you recently
 - **Track engagement** - Monitor who liked your tracks
 - **New releases** - Get notifications when tracked artists release new music
-- **Smart API usage** - Only fetches what changed, automatically skips dormant artists (configurable threshold)
+- **Smart API usage** - Only fetches what changed, automatically skips dormant artists
 - **Rate limit handling** - Exponential backoff for API reliability
-- **Automatic background checking** - Configurable interval (default: 6 hours)
-- **Session-agnostic notifications** - Works with any OpenClaw session (Telegram, Discord, etc.)
 
 ## Prerequisites
 
 - OpenClaw gateway running
 - Node.js 22+ installed
-- SoundCloud API credentials ([get them here](https://soundcloud.com/you/apps))
+- SoundCloud API credentials
 
 ## Quick Start
 
 ### 1. Install
 
 ```bash
-# From npm (recommended)
 openclaw plugins install @akilles/soundcloud-watcher
-
-# Or from source
-git clone https://github.com/wlinds/openclaw-soundcloud-watcher
-openclaw plugins install -l ./openclaw-soundcloud-watcher/openclaw-soundcloud-watcher
+openclaw plugins enable soundcloud-watcher
+openclaw gateway restart
 ```
-
 
 ### 2. Get SoundCloud Credentials
 
 1. Log into SoundCloud
 2. Go to [soundcloud.com/you/apps](https://soundcloud.com/you/apps)
 3. Click "Register a new application"
-4. Fill in name and website
-5. Copy your **Client ID** and **Client Secret** for next step
+4. Fill in name and website (any URL works)
+5. Copy your **Client ID** and **Client Secret**
 
 ### 3. Configure
 
-**In your OpenClaw chat interface** (Telegram/Discord/Web), type:
+Create the credentials file:
+
+```bash
+nano ~/.openclaw/secrets/soundcloud.env
+```
+
+Add your credentials:
 
 ```
-/soundcloud-setup
-```
-
-This command shows your current config status and provides a template. Then edit `~/.openclaw/openclaw.json` on your server and paste your credentials:
-
-```json
-{
-  "plugins": {
-    "enabled": true,
-    "entries": {
-      "soundcloud-watcher": {
-        "enabled": true,
-        "config": {
-          "clientId": "YOUR_CLIENT_ID",
-          "clientSecret": "YOUR_CLIENT_SECRET",
-          "username": "your_soundcloud_username",
-          "checkIntervalHours": 6,
-          "myTracksLimit": 10,
-          "dormantDays": 90,
-          "sessionKey": "agent:main:main"
-        }
-      }
-    }
-  }
-}
+SOUNDCLOUD_CLIENT_ID=your_client_id
+SOUNDCLOUD_CLIENT_SECRET=your_client_secret
+MY_USERNAME=your_soundcloud_username
 ```
 
 ### 4. Restart & Verify
 
-In your terminal:
 ```bash
 openclaw gateway restart
-openclaw plugins list        # Should show soundcloud-watcher
 ```
 
-Then in OpenClaw chat, verify it's working:
+Then in chat:
 ```
-/soundcloud-status
+/soundcloud-setup    # Should show "Already configured!"
+/soundcloud-status   # Should show your account info
 ```
-
-### 5. Start Tracking
-
-In OpenClaw chat, add artists to track:
-```
-/soundcloud-add lindstedt
-/soundcloud-add noisia
-/soundcloud-list
-```
-
-Done! Updates arrive automatically every 6 hours.
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `/soundcloud-setup` | Interactive setup guide with config status |
+| `/soundcloud-setup` | Show setup instructions and config status |
 | `/soundcloud-status` | Show tracking status and account info |
-| `/soundcloud-check` | Run immediate check (don't wait for interval) |
+| `/soundcloud-check` | Run immediate check for updates |
 | `/soundcloud-add <username>` | Track artist(s) - space-separated |
-| `/soundcloud-remove <username>` | Untrack artist |
+| `/soundcloud-remove <username>` | Stop tracking an artist |
 | `/soundcloud-list` | List all tracked artists |
 
-## Configuration Options
+## File Locations
 
-All options in `~/.openclaw/openclaw.json` under `plugins.entries.soundcloud-watcher.config`:
-
-| Option | Type | Required | Default | Description |
-|--------|------|----------|---------|-------------|
-| `enabled` | boolean | No | true | Enable/disable watcher |
-| `clientId` | string | Yes | - | SoundCloud API Client ID |
-| `clientSecret` | string | Yes | - | SoundCloud API Client Secret |
-| `username` | string | Yes | - | Your SoundCloud username |
-| `checkIntervalHours` | number | No | 6 | Hours between automatic checks |
-| `myTracksLimit` | number | No | 10 | Number of your tracks to monitor |
-| `dormantDays` | number | No | 90 | Days before artist is considered dormant |
-| `sessionKey` | string | No | `agent:main:main` | OpenClaw session for notifications |
-
-## Architecture
-
-The plugin consists of three main components:
-
-- **Plugin entry** ([openclaw-soundcloud-watcher/index.ts](openclaw-soundcloud-watcher/index.ts)) - Manages lifecycle, spawns watcher process
-- **Watcher** ([openclaw-soundcloud-watcher/soundcloud_watcher.ts](openclaw-soundcloud-watcher/soundcloud_watcher.ts)) - Pure TypeScript implementation of monitoring logic
-- **Manifest** ([openclaw-soundcloud-watcher/openclaw.plugin.json](openclaw-soundcloud-watcher/openclaw.plugin.json)) - Configuration schema and plugin metadata
-
-### File Locations
-
-After installation:
-
-- **Plugin code:** `~/.openclaw/extensions/soundcloud-watcher/`
-- **Config:** `~/.openclaw/openclaw.json`
-- **Credentials:** `~/.openclaw/secrets/soundcloud.env`
-- **Account data:** `~/.openclaw/data/soundcloud_tracking.json`
-- **Artist data:** `~/.openclaw/data/artists.json`
-- **Backoff state:** `~/.openclaw/soundcloud_backoff.json`
+| File | Purpose |
+|------|---------|
+| `~/.openclaw/secrets/soundcloud.env` | Your API credentials |
+| `~/.openclaw/data/artists.json` | Tracked artists data |
+| `~/.openclaw/data/soundcloud_tracking.json` | Your account tracking data |
 
 ## Troubleshooting
+
+### "Not configured" error
+
+Check your credentials file exists and has correct format:
+
+```bash
+cat ~/.openclaw/secrets/soundcloud.env
+```
+
+Should contain:
+```
+SOUNDCLOUD_CLIENT_ID=...
+SOUNDCLOUD_CLIENT_SECRET=...
+MY_USERNAME=...
+```
 
 ### Plugin not loading
 
 ```bash
 openclaw plugins list
-openclaw gateway logs
 ```
 
-Check that:
-- Plugin shows as `enabled: true` in list
-- Gateway logs don't show errors
+Should show `soundcloud-watcher` as `loaded`. If `disabled`:
 
-Verify plugin directory exists:
 ```bash
-ls -la ~/.openclaw/extensions/soundcloud-watcher/
+openclaw plugins enable soundcloud-watcher
+openclaw gateway restart
 ```
 
 ### API rate limits
 
-If you hit rate limits:
-1. Increase `checkIntervalHours` in config (default: 6)
-2. Increase `dormantDays` to skip inactive artists sooner (default: 90)
-3. Check SoundCloud API status
-
-### No notifications
-
-Check gateway session key in the plugin config (default is `agent:main:main`).
-
-Verify gateway is running:
-```bash
-openclaw gateway status
-```
-
-### Setup help
-
-Run `/soundcloud-setup` for detailed instructions with current config status.
-
-## Updating
-
-If installed via symlink (`-l`):
-```bash
-cd /path/to/openclaw-soundcloud-watcher
-git pull
-openclaw gateway restart
-```
-
-If installed from npm:
-```bash
-openclaw plugins install @akilles/soundcloud-watcher  # Gets latest
-openclaw gateway restart
-```
+The plugin handles rate limits automatically with exponential backoff. If issues persist, wait a few minutes and try again.
 
 ## Uninstalling
 
 ```bash
 openclaw plugins disable soundcloud-watcher
-openclaw plugins uninstall soundcloud-watcher
+rm -rf ~/.openclaw/extensions/soundcloud-watcher
 ```
 
-Clean up data (optional):
+Optionally remove data:
 ```bash
-rm -rf ~/.openclaw/data/soundcloud_tracking.json
-rm -rf ~/.openclaw/data/artists.json
-rm -rf ~/.openclaw/secrets/soundcloud.env
-rm -rf ~/.openclaw/soundcloud_backoff.json
+rm ~/.openclaw/secrets/soundcloud.env
+rm ~/.openclaw/data/artists.json
+rm ~/.openclaw/data/soundcloud_tracking.json
 ```
 
-## Support
+## Links
 
 - **GitHub:** https://github.com/wlinds/openclaw-soundcloud-watcher
-- **Issues:** https://github.com/wlinds/openclaw-soundcloud-watcher/issues
+- **npm:** https://www.npmjs.com/package/@akilles/soundcloud-watcher
 - **OpenClaw Docs:** https://docs.openclaw.ai/plugin
 
 ## License
 
-MIT - See [LICENSE](LICENSE) for details
+MIT
