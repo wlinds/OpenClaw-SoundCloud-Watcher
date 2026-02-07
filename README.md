@@ -43,13 +43,13 @@ openclaw plugins install -l ./openclaw-soundcloud-watcher/openclaw-soundcloud-wa
 
 ### 3. Configure
 
-Run the setup command to see the configuration template:
+**In your OpenClaw chat interface** (Telegram/Discord/Web), type:
 
-```bash
+```
 /soundcloud-setup
 ```
 
-Then edit `~/.openclaw/openclaw.json` and paste your credentials:
+This command shows your current config status and provides a template. Then edit `~/.openclaw/openclaw.json` on your server and paste your credentials:
 
 ```json
 {
@@ -75,15 +75,21 @@ Then edit `~/.openclaw/openclaw.json` and paste your credentials:
 
 ### 4. Restart & Verify
 
+In your terminal:
 ```bash
 openclaw gateway restart
 openclaw plugins list        # Should show soundcloud-watcher
-/soundcloud-status           # Should show your account info
 ```
 
-### 5. Start Tracking your favorite artist
+Then in OpenClaw chat, verify it's working:
+```
+/soundcloud-status
+```
 
-```bash
+### 5. Start Tracking
+
+In OpenClaw chat, add artists to track:
+```
 /soundcloud-add lindstedt
 /soundcloud-add noisia
 /soundcloud-list

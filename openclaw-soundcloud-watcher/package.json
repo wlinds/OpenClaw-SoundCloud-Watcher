@@ -1,6 +1,6 @@
 {
   "name": "@akilles/soundcloud-watcher",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "OpenClaw plugin to monitor SoundCloud account and track artist releases",
   "main": "index.ts",
   "openclaw": {
@@ -10,7 +10,7 @@
   },
   "scripts": {
     "preinstall": "echo 'Installing SoundCloud Watcher dependencies...'",
-    "postinstall": "echo 'SoundCloud Watcher installed! Run /soundcloud-setup to configure.'",
+    "postinstall": "echo '\n✓ SoundCloud Watcher installed!\n\nNext steps:\n1. Get API credentials: https://soundcloud.com/you/apps\n2. Add to ~/.openclaw/openclaw.json:\n\n   \"soundcloud-watcher\": {\n     \"enabled\": true,\n     \"config\": {\n       \"clientId\": \"YOUR_CLIENT_ID\",\n       \"clientSecret\": \"YOUR_CLIENT_SECRET\",\n       \"username\": \"your_soundcloud_username\"\n     }\n   }\n\n3. Restart: openclaw gateway restart\n4. Verify in chat: /soundcloud-setup\n'",
     "test": "echo \"No tests yet\""
   },
   "keywords": [
