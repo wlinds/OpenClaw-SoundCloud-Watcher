@@ -47,6 +47,6 @@
         "description": "OpenClaw session key for notifications (e.g., 'agent:main:main', 'telegram:chat123', etc.)"
       }
     },
-    "required": ["clientId", "clientSecret", "username"]
+    "required": []
   }
 }

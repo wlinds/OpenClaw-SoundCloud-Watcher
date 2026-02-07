@@ -1,11 +1,13 @@
 {
   "name": "@akilles/soundcloud-watcher",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "OpenClaw plugin to monitor SoundCloud account and track artist releases",
   "main": "index.ts",
-  "openclaw.extensions": [
-    "index.ts"
-  ],
+  "openclaw": {
+    "extensions": [
+      "index.ts"
+    ]
+  },
   "scripts": {
     "preinstall": "echo 'Installing SoundCloud Watcher dependencies...'",
     "postinstall": "echo 'SoundCloud Watcher installed! Run /soundcloud-setup to configure.'",
