@@ -1,0 +1,49 @@
+{
+  "name": "@akilles/soundcloud-watcher",
+  "version": "1.0.1",
+  "description": "OpenClaw plugin to monitor SoundCloud account and track artist releases",
+  "main": "index.ts",
+  "openclaw.extensions": [
+    "index.ts"
+  ],
+  "scripts": {
+    "preinstall": "echo 'Installing SoundCloud Watcher dependencies...'",
+    "postinstall": "echo 'SoundCloud Watcher installed! Run /soundcloud-setup to configure.'",
+    "test": "echo \"No tests yet\""
+  },
+  "keywords": [
+    "soundcloud",
+    "openclaw",
+    "plugin",
+    "music",
+    "monitoring",
+    "typescript"
+  ],
+  "author": "Akilles William Lindstedt",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wlinds/openclaw-soundcloud-watcher.git",
+    "directory": "openclaw-soundcloud-watcher"
+  },
+  "bugs": {
+    "url": "https://github.com/wlinds/openclaw-soundcloud-watcher/issues"
+  },
+  "homepage": "https://github.com/wlinds/openclaw-soundcloud-watcher#readme",
+  "files": [
+    "index.ts",
+    "soundcloud_watcher.ts",
+    "openclaw.plugin.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "tsx": "^4.0.0"
+  },
+  "peerDependencies": {
+    "@types/node": "^22.0.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
