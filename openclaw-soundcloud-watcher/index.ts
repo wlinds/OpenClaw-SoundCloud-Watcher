@@ -1,7 +1,9 @@
 import { SoundCloudWatcher } from './soundcloud_watcher';
+import { readFileSync, existsSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
 
 interface PluginConfig {
-  enabled: boolean;
   clientId: string;
   clientSecret: string;
   username: string;
@@ -11,138 +13,115 @@ interface PluginConfig {
   sessionKey?: string;
 }
 
+function loadConfig(): PluginConfig | null {
+  // Try loading from env file first
+  const envPath = join(homedir(), '.openclaw', 'secrets', 'soundcloud.env');
+  if (existsSync(envPath)) {
+    const content = readFileSync(envPath, 'utf-8');
+    const env: Record<string, string> = {};
+    for (const line of content.split('\n')) {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
+        const [key, ...rest] = trimmed.split('=');
+        env[key.trim()] = rest.join('=').trim();
+      }
+    }
+    if (env.SOUNDCLOUD_CLIENT_ID && env.SOUNDCLOUD_CLIENT_SECRET && env.MY_USERNAME) {
+      return {
+        clientId: env.SOUNDCLOUD_CLIENT_ID,
+        clientSecret: env.SOUNDCLOUD_CLIENT_SECRET,
+        username: env.MY_USERNAME,
+        checkIntervalHours: 6,
+        myTracksLimit: 10,
+        dormantDays: 90,
+        sessionKey: 'agent:main:main',
+      };
+    }
+  }
+  return null;
+}
+
 export default function register(api: any) {
   const logger = api.getLogger?.() || console;
-  let checkInterval: NodeJS.Timeout | null = null;
   let watcher: SoundCloudWatcher | null = null;
 
-  function getWatcher(): SoundCloudWatcher {
-    if (!watcher) {
-      const config = api.getConfig() as PluginConfig;
-      watcher = new SoundCloudWatcher({
-        clientId: config.clientId || '',
-        clientSecret: config.clientSecret || '',
-        username: config.username || '',
-        myTracksLimit: config.myTracksLimit,
-        dormantDays: config.dormantDays,
-        logger: (...args: any[]) => logger.debug(...args),
-      });
-    }
+  function getWatcher(): SoundCloudWatcher | null {
+    if (watcher) return watcher;
+    
+    const config = loadConfig();
+    if (!config) return null;
+    
+    watcher = new SoundCloudWatcher({
+      clientId: config.clientId,
+      clientSecret: config.clientSecret,
+      username: config.username,
+      myTracksLimit: config.myTracksLimit,
+      dormantDays: config.dormantDays,
+      logger: (...args: any[]) => logger.debug?.(...args) || console.log(...args),
+    });
     return watcher;
   }
 
-  async function checkForUpdates(config: PluginConfig, sessionKey?: string) {
-    if (!config.enabled) {
-      logger.debug('SoundCloud watcher is disabled');
-      return;
+  function getSetupMessage(): string {
+    const config = loadConfig();
+    
+    if (config) {
+      return `# SoundCloud Watcher Setup
+
+Already configured!
+
+- Username: ${config.username}
+- Client ID: ${config.clientId.substring(0, 8)}...${config.clientId.slice(-4)}
+- Check interval: ${config.checkIntervalHours} hours
+
+To update credentials, edit:
+\`~/.openclaw/secrets/soundcloud.env\`
+
+Then restart: \`openclaw gateway restart\``;
     }
+    
+    return `# SoundCloud Watcher Setup
 
-    try {
-      logger.info('Running SoundCloud check...');
-      const message = await getWatcher().runCron();
+Not configured yet.
 
-      if (message) {
-        logger.info('SoundCloud updates found');
+## Steps:
 
-        if (sessionKey) {
-          try {
-            await api.tools.sessions_send({
-              sessionKey,
-              message,
-            });
-          } catch (err) {
-            logger.error('Failed to send notification:', err);
-          }
-        }
-      } else {
-        logger.debug('No SoundCloud updates');
-      }
-    } catch (err) {
-      logger.error('Error during SoundCloud check:', err);
-    }
-  }
+1. Get credentials from https://soundcloud.com/you/apps
 
-  function startChecking(config: PluginConfig, sessionKey?: string) {
-    if (checkInterval) {
-      clearInterval(checkInterval);
-    }
+2. Create config file:
+\`\`\`bash
+mkdir -p ~/.openclaw/secrets
+nano ~/.openclaw/secrets/soundcloud.env
+\`\`\`
 
-    const intervalMs = config.checkIntervalHours * 60 * 60 * 1000;
+3. Add your credentials:
+\`\`\`
+SOUNDCLOUD_CLIENT_ID=your_client_id
+SOUNDCLOUD_CLIENT_SECRET=your_client_secret
+MY_USERNAME=your_soundcloud_username
+\`\`\`
 
-    checkForUpdates(config, sessionKey).catch((err) => {
-      logger.error('Initial SoundCloud check failed:', err);
-    });
+4. Restart: \`openclaw gateway restart\`
 
-    checkInterval = setInterval(() => {
-      checkForUpdates(config, sessionKey).catch((err) => {
-        logger.error('Periodic SoundCloud check failed:', err);
-      });
-    }, intervalMs);
-
-    logger.info(`SoundCloud watcher started (checking every ${config.checkIntervalHours}h)`);
-  }
-
-  function stopChecking() {
-    if (checkInterval) {
-      clearInterval(checkInterval);
-      checkInterval = null;
-      logger.info('SoundCloud watcher stopped');
-    }
+5. Verify: \`/soundcloud-status\``;
   }
 
   // Register commands
   api.registerCommand({
     name: 'soundcloud-setup',
-    description: 'Interactive setup for SoundCloud credentials',
-    handler: async (ctx: any) => {
-      const config = api.getConfig() as PluginConfig;
-
-      let message = '# SoundCloud Watcher Setup\n\n';
-
-      if (config.clientId && config.clientSecret && config.username) {
-        message += 'Already configured!\n\n';
-        message += `- Username: ${config.username}\n`;
-        message += `- Client ID: ${config.clientId.substring(0, 8)}...${config.clientId.slice(-4)}\n`;
-        message += `- Check interval: ${config.checkIntervalHours} hours\n`;
-        message += `- Session key: ${config.sessionKey || 'agent:main:main'}\n\n`;
-        message += 'To update, edit `~/.openclaw/openclaw.json` under:\n';
-        message += '`plugins.entries.soundcloud-watcher.config`\n\n';
-        message += 'Then restart: `openclaw gateway restart`';
-      } else {
-        message += 'Warning: Not configured yet\n\n';
-        message += '## Steps:\n\n';
-        message += '1. Get credentials from https://soundcloud.com/you/apps\n';
-        message += '2. Edit `~/.openclaw/openclaw.json`:\n\n';
-        message += '```json\n';
-        message += '{\n';
-        message += '  "plugins": {\n';
-        message += '    "entries": {\n';
-        message += '      "soundcloud-watcher": {\n';
-        message += '        "enabled": true,\n';
-        message += '        "config": {\n';
-        message += '          "clientId": "YOUR_CLIENT_ID",\n';
-        message += '          "clientSecret": "YOUR_CLIENT_SECRET",\n';
-        message += '          "username": "your_soundcloud_username",\n';
-        message += '          "checkIntervalHours": 6\n';
-        message += '        }\n';
-        message += '      }\n';
-        message += '    }\n';
-        message += '  }\n';
-        message += '}\n';
-        message += '```\n\n';
-        message += '3. Restart: `openclaw gateway restart`\n';
-        message += '4. Verify in chat: `/soundcloud-setup`\n';
-      }
-
-      return { text: message };
+    description: 'Show SoundCloud watcher setup instructions',
+    handler: async () => {
+      return { text: getSetupMessage() };
     },
   });
 
   api.registerCommand({
     name: 'soundcloud-status',
     description: 'Show SoundCloud watcher status',
-    handler: async (ctx: any) => {
-      const result = await getWatcher().status();
+    handler: async () => {
+      const w = getWatcher();
+      if (!w) return { text: 'Not configured. Run /soundcloud-setup for instructions.' };
+      const result = await w.status();
       return { text: result };
     },
   });
@@ -150,8 +129,10 @@ export default function register(api: any) {
   api.registerCommand({
     name: 'soundcloud-check',
     description: 'Run an immediate SoundCloud check',
-    handler: async (ctx: any) => {
-      const result = await getWatcher().check();
+    handler: async () => {
+      const w = getWatcher();
+      if (!w) return { text: 'Not configured. Run /soundcloud-setup for instructions.' };
+      const result = await w.check();
       return { text: result };
     },
   });
@@ -159,11 +140,15 @@ export default function register(api: any) {
   api.registerCommand({
     name: 'soundcloud-add',
     description: 'Add artist(s) to track',
-    handler: async (ctx: any, ...usernames: string[]) => {
-      if (usernames.length === 0) {
-        return { text: 'Usage: /soundcloud-add <username> [username2] ...' };
-      }
-      const result = await getWatcher().addArtists(usernames);
+    handler: async (ctx: any) => {
+      const w = getWatcher();
+      if (!w) return { text: 'Not configured. Run /soundcloud-setup for instructions.' };
+      
+      const args = ctx.args?.trim();
+      if (!args) return { text: 'Usage: /soundcloud-add <username> [username2] ...' };
+      
+      const usernames = args.split(/\s+/).filter(Boolean);
+      const result = await w.addArtists(usernames);
       return { text: result };
     },
   });
@@ -171,11 +156,14 @@ export default function register(api: any) {
   api.registerCommand({
     name: 'soundcloud-remove',
     description: 'Remove an artist from tracking',
-    handler: async (ctx: any, username?: string) => {
-      if (!username) {
-        return { text: 'Usage: /soundcloud-remove <username>' };
-      }
-      const result = await getWatcher().removeArtist(username);
+    handler: async (ctx: any) => {
+      const w = getWatcher();
+      if (!w) return { text: 'Not configured. Run /soundcloud-setup for instructions.' };
+      
+      const username = ctx.args?.trim();
+      if (!username) return { text: 'Usage: /soundcloud-remove <username>' };
+      
+      const result = await w.removeArtist(username);
       return { text: result };
     },
   });
@@ -183,34 +171,13 @@ export default function register(api: any) {
   api.registerCommand({
     name: 'soundcloud-list',
     description: 'List all tracked artists',
-    handler: async (ctx: any) => {
-      const result = await getWatcher().listArtists();
+    handler: async () => {
+      const w = getWatcher();
+      if (!w) return { text: 'Not configured. Run /soundcloud-setup for instructions.' };
+      const result = await w.listArtists();
       return { text: result };
     },
   });
 
-  // Handle config changes
-  api.onConfigChange?.((config: PluginConfig) => {
-    watcher = null; // Reset watcher so it picks up new config
-    if (config.enabled) {
-      const sessionKey = config.sessionKey || 'agent:main:main';
-      startChecking(config, sessionKey);
-    } else {
-      stopChecking();
-    }
-  });
-
-  // Initialize on load
-  const initialConfig = api.getConfig() as PluginConfig;
-  if (initialConfig.enabled) {
-    const sessionKey = initialConfig.sessionKey || 'agent:main:main';
-    startChecking(initialConfig, sessionKey);
-  }
-
-  // Cleanup on unload
-  api.onUnload?.(() => {
-    stopChecking();
-  });
-
-  logger.info('SoundCloud Watcher plugin loaded');
+  logger.info?.('SoundCloud Watcher plugin loaded') || console.log('SoundCloud Watcher plugin loaded');
 }
