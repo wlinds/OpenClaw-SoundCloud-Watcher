@@ -1,6 +1,5 @@
-#!/usr/bin/env npx tsx
 /**
- * SoundCloud Watcher: Cron script for tracking your SoundCloud account
+ * SoundCloud Watcher: Module for tracking your SoundCloud account
  * and getting notified about new releases from artists you care about.
  *
  * Features:
@@ -9,21 +8,8 @@
  *   - New release detection from a curated artist list
  *   - Dormant artist throttling (skip inactive artists to save API calls)
  *   - Rate limit backoff (exponential backoff on 429s)
- *   - Single cron entry runs everything
  *
- * Setup:
- *   1. Create config file (see PATHS below) with your SoundCloud API credentials
- *   2. Run: npx tsx soundcloud_cron.ts add <artist_username>
- *   3. Run: npx tsx soundcloud_cron.ts check
- *   4. Add to cron: 0 * /6 * * * npx tsx /path/to/soundcloud_cron.ts cron
- *
- * Config file format (one KEY=VALUE per line):
- *   SOUNDCLOUD_CLIENT_ID=your_client_id
- *   SOUNDCLOUD_CLIENT_SECRET=your_client_secret
- *   SOUNDCLOUD_ACCESS_TOKEN=auto_managed_by_script
- *   MY_USERNAME=your_soundcloud_username
- *
- * Requirements: Node.js 22+ (uses built-in fetch), npx tsx (or ts-node)
+ * Exported as a class for direct import (no subprocess spawning).
  */
 
 import * as fs from "fs";
@@ -31,71 +17,47 @@ import * as path from "path";
 import * as os from "os";
 
 // =============================================================================
-// CONFIGURATION - edit these to match your setup
+// CONFIGURATION
 // =============================================================================
 
-/** Your SoundCloud username (the URL slug, e.g. soundcloud.com/THIS_PART) */
-const MY_USERNAME = "your_username";
-
-/** Where to store config and data files - using OpenClaw standard paths */
 const OPENCLAW_DIR = path.join(os.homedir(), ".openclaw");
 const CONFIG_FILE = path.join(OPENCLAW_DIR, "secrets", "soundcloud.env");
 const ACCOUNT_DATA = path.join(OPENCLAW_DIR, "data", "soundcloud_tracking.json");
 const ARTISTS_DATA = path.join(OPENCLAW_DIR, "data", "artists.json");
 const BACKOFF_FILE = path.join(OPENCLAW_DIR, "soundcloud_backoff.json");
 
-// --- Notification settings ---
-/** Set to true to send notifications via a gateway, false for stdout only */
-const NOTIFICATIONS_ENABLED = false;
-const GATEWAY_CONFIG = path.join(OPENCLAW_DIR, "gateway.json");
-const GATEWAY_SESSION_KEY = "default";
-const GATEWAY_PORT_DEFAULT = 8080;
-const GATEWAY_ENDPOINT = "/tools/invoke";
-const GATEWAY_TOOL_NAME = "sessions_send";
-
 // =============================================================================
-// TUNING - adjust these to balance API usage vs responsiveness
+// TUNING
 // =============================================================================
 
-/** How many of YOUR recent tracks to monitor for likes/reposts */
-const MY_TRACKS_LIMIT = 10;
-
-/** How many recent tracks to fetch per artist when checking for new releases */
 const ARTIST_TRACKS_LIMIT = 5;
-
-/** How many tracks to fetch when first adding an artist (seeds known tracks) */
 const ARTIST_ADD_LIMIT = 50;
-
-/** Artists who haven't uploaded in this many days are considered "dormant" */
-const DORMANT_DAYS = 90;
-
-/** Dormant artists are only checked every N days instead of every run */
 const DORMANT_CHECK_INTERVAL_DAYS = 7;
-
-/** Max stored track IDs per artist (older ones pruned to save disk/memory) */
 const MAX_KNOWN_TRACKS = 50;
-
-/** Max likers to fetch per track */
 const MAX_LIKERS_PER_TRACK = 50;
-
-/** Followers pagination page size (SoundCloud max is 200) */
 const FOLLOWERS_PAGE_SIZE = 200;
 
-// --- Rate limit backoff ---
-const BACKOFF_BASE_SECONDS = 300; // 5 min initial backoff after a 429
-const BACKOFF_MAX_SECONDS = 7200; // 2 hour ceiling
+const BACKOFF_BASE_SECONDS = 300;
+const BACKOFF_MAX_SECONDS = 7200;
 
-// --- Timeouts ---
 const API_TIMEOUT_MS = 15_000;
-const GATEWAY_TIMEOUT_MS = 60_000;
 
 // =============================================================================
-// INTERNALS - you probably don't need to change anything below
+// INTERNALS
 // =============================================================================
 
 const API_BASE = "https://api.soundcloud.com";
 
 // -- Types --------------------------------------------------------------------
+
+export interface SoundCloudWatcherConfig {
+  clientId: string;
+  clientSecret: string;
+  username: string;
+  myTracksLimit?: number;
+  dormantDays?: number;
+  logger?: (...args: any[]) => void;
+}
 
 interface UserInfo {
   username: string;
@@ -159,20 +121,14 @@ function daysSince(isoDate: string): number | null {
   return isNaN(ms) ? null : Math.floor(ms / 86_400_000);
 }
 
-/**
- * Parse SoundCloud timestamps into Unix ms.
- * SoundCloud returns dates like: "2026/01/22 16:22:27 +0000"
- */
 function parseTimestamp(ts: string | null | undefined): number {
   if (!ts) return NaN;
   try {
-    // "2026/01/22 16:22:27 +0000" → "2026-01-22T16:22:27+00:00"
-    let cleaned = ts.replace(/\//g, "-").replace(" ", "T"); // first space only
+    let cleaned = ts.replace(/\//g, "-").replace(" ", "T");
     cleaned = cleaned.replace(" +0000", "+00:00").replace("Z", "+00:00");
     const d = new Date(cleaned);
     return d.getTime();
   } catch {
-    console.log(`Warning: Could not parse timestamp '${ts}'`);
     return NaN;
   }
 }
@@ -205,26 +161,26 @@ function num(val: unknown): number {
 // -- Config -------------------------------------------------------------------
 
 class Config {
-  clientId = "";
-  clientSecret = "";
+  clientId: string;
+  clientSecret: string;
   accessToken = "";
-  myUsername = MY_USERNAME;
+  myUsername: string;
 
-  static load(): Config {
-    const cfg = new Config();
-    if (!fs.existsSync(CONFIG_FILE)) return cfg;
+  constructor(clientId: string, clientSecret: string, username: string) {
+    this.clientId = clientId;
+    this.clientSecret = clientSecret;
+    this.myUsername = username;
 
-    for (const line of fs.readFileSync(CONFIG_FILE, "utf-8").split("\n")) {
-      if (!line.includes("=") || line.startsWith("#")) continue;
-      const [k, ...rest] = line.split("=");
-      const key = k.trim();
-      const val = rest.join("=").trim();
-      if (key === "SOUNDCLOUD_CLIENT_ID") cfg.clientId = val;
-      else if (key === "SOUNDCLOUD_CLIENT_SECRET") cfg.clientSecret = val;
-      else if (key === "SOUNDCLOUD_ACCESS_TOKEN") cfg.accessToken = val;
-      else if (key === "MY_USERNAME") cfg.myUsername = val;
+    // Load persisted access token from env file if it exists
+    if (fs.existsSync(CONFIG_FILE)) {
+      for (const line of fs.readFileSync(CONFIG_FILE, "utf-8").split("\n")) {
+        if (!line.includes("=") || line.startsWith("#")) continue;
+        const [k, ...rest] = line.split("=");
+        if (k.trim() === "SOUNDCLOUD_ACCESS_TOKEN") {
+          this.accessToken = rest.join("=").trim();
+        }
+      }
     }
-    return cfg;
   }
 
   saveToken(token: string): void {
@@ -251,7 +207,10 @@ class Config {
 class SoundCloudAPI {
   calls = 0;
 
-  constructor(private config: Config) {}
+  constructor(
+    private config: Config,
+    private log: (...args: any[]) => void
+  ) {}
 
   private checkBackoff(): number | null {
     const data = readJson<{ last_fail?: number; fail_count?: number }>(
@@ -288,7 +247,7 @@ class SoundCloudAPI {
 
     const remaining = this.checkBackoff();
     if (remaining) {
-      console.log(`Token refresh in backoff (${remaining}s remaining)`);
+      this.log(`Token refresh in backoff (${remaining}s remaining)`);
       return false;
     }
 
@@ -306,25 +265,24 @@ class SoundCloudAPI {
       });
       if (resp.status === 429) {
         this.setBackoff();
-        console.log("Token refresh rate limited (429)");
+        this.log("Token refresh rate limited (429)");
         return false;
       }
       if (!resp.ok) {
-        console.log(`Token refresh failed: ${resp.status}`);
+        this.log(`Token refresh failed: ${resp.status}`);
         return false;
       }
       const result = (await resp.json()) as { access_token: string };
       this.config.saveToken(result.access_token);
       this.clearBackoff();
-      console.log("Token refreshed");
+      this.log("Token refreshed");
       return true;
     } catch (e) {
-      console.log(`Token refresh failed: ${e}`);
+      this.log(`Token refresh failed: ${e}`);
       return false;
     }
   }
 
-  /** Make authenticated GET request. Accepts relative (/users/...) or full URLs. */
   async get(
     url: string,
     params?: Record<string, string | number>,
@@ -364,29 +322,26 @@ class SoundCloudAPI {
         }
       }
       if (!resp.ok) {
-        console.log(`API error ${resp.status}: ${fullUrl}`);
+        this.log(`API error ${resp.status}: ${fullUrl}`);
         return null;
       }
       return (await resp.json()) as Record<string, any>;
     } catch (e) {
-      console.log(`API error: ${e}`);
+      this.log(`API error: ${e}`);
       return null;
     }
   }
 
-  /** Resolve username to user object. */
   resolve(username: string) {
     return this.get("/resolve", {
       url: `https://soundcloud.com/${username}`,
     });
   }
 
-  /** Get user profile by ID (includes followers_count). */
   getUser(userId: number) {
     return this.get(`/users/${userId}`);
   }
 
-  /** Get a user's tracks. Response includes play/like/repost counts per track. */
   async getTracks(userId: number, limit = 20): Promise<Record<string, any>[]> {
     const data = await this.get(`/users/${userId}/tracks`, {
       limit,
@@ -397,7 +352,6 @@ class SoundCloudAPI {
     return Array.isArray(collection) ? collection : [];
   }
 
-  /** Get users who liked a specific track. */
   async getTrackLikers(
     trackId: number,
     limit = MAX_LIKERS_PER_TRACK
@@ -423,7 +377,6 @@ class SoundCloudAPI {
     return likers;
   }
 
-  /** Paginate through all followers. Expensive - only call when follower count changes. */
   async getFollowersPaginated(
     userId: number
   ): Promise<Record<string, UserInfo>> {
@@ -449,7 +402,7 @@ class SoundCloudAPI {
 
       const nextHref = data.next_href;
       if (nextHref && nextHref !== nextUrl) {
-        nextUrl = nextHref; // Full URL with cursor params included
+        nextUrl = nextHref;
         params = undefined;
       } else {
         break;
@@ -466,7 +419,9 @@ class AccountWatcher {
 
   constructor(
     private api: SoundCloudAPI,
-    private config: Config
+    private config: Config,
+    private myTracksLimit: number,
+    private log: (...args: any[]) => void
   ) {
     const defaults: AccountState = {
       my_account: null,
@@ -484,16 +439,9 @@ class AccountWatcher {
     writeJson(ACCOUNT_DATA, this.data);
   }
 
-  /**
-   * Run account check. Returns list of human-readable notification strings.
-   *
-   * API calls on a quiet day: 2 (profile + tracks)
-   * API calls on follower change: 2 + ceil(followers/200) + tracks_with_new_likes
-   */
   async check(): Promise<string[]> {
     const notifications: string[] = [];
 
-    // Resolve account on first run
     if (!this.data.my_account) {
       const user = await this.api.resolve(this.config.myUsername);
       if (!user) return ["Failed to resolve SoundCloud user"];
@@ -505,29 +453,26 @@ class AccountWatcher {
 
     const userId = this.data.my_account.user_id;
 
-    // Fetch profile to check follower count (1 API call)
     const profile = await this.api.getUser(userId);
     if (!profile) {
-      console.log("Failed to fetch profile, skipping account check");
-      return notifications; // Don't save - preserve previous state
+      this.log("Failed to fetch profile, skipping account check");
+      return notifications;
     }
 
     const currentCount = num(profile.followers_count);
     const storedCount = this.data.follower_count;
 
-    // Only paginate full follower list if the count actually changed
     if (currentCount !== storedCount || !Object.keys(this.data.my_followers).length) {
-      console.log(
+      this.log(
         `Follower count changed: ${storedCount} -> ${currentCount}, fetching list...`
       );
       const currentFollowers = await this.api.getFollowersPaginated(userId);
 
       if (!Object.keys(currentFollowers).length && storedCount > 0) {
-        console.log("API returned empty followers, skipping comparison");
+        this.log("API returned empty followers, skipping comparison");
       } else {
         const stored = this.data.my_followers;
 
-        // Skip diff on first run (everything would show as "new")
         if (Object.keys(stored).length) {
           const newFollowers = Object.entries(currentFollowers)
             .filter(([uid]) => !stored[uid])
@@ -555,11 +500,10 @@ class AccountWatcher {
         this.data.follower_count = currentCount;
       }
     } else {
-      console.log(`Follower count unchanged (${currentCount}), skipping pagination`);
+      this.log(`Follower count unchanged (${currentCount}), skipping pagination`);
     }
 
-    // Fetch my tracks - play/like/repost counts included in response (1 API call)
-    const tracks = await this.api.getTracks(userId, MY_TRACKS_LIMIT);
+    const tracks = await this.api.getTracks(userId, this.myTracksLimit);
     if (tracks.length) {
       const prevMap = new Map(this.data.track_stats.map((s) => [s.track_id, s]));
       const newStats: TrackStats[] = [];
@@ -584,7 +528,6 @@ class AccountWatcher {
           const prevLikes = prev.likes;
           const prevLikers = prev.likers ?? {};
 
-          // Only fetch liker list if like count changed (or never seeded)
           const needsLikerFetch =
             currentLikes !== prevLikes ||
             (currentLikes > 0 && !Object.keys(prevLikers).length);
@@ -611,7 +554,6 @@ class AccountWatcher {
               notifications.push(`${names} unliked '${title}'`);
             }
           } else {
-            // No change - carry forward previous liker data
             stats.likers = prevLikers;
           }
 
@@ -622,7 +564,6 @@ class AccountWatcher {
             );
           }
         } else {
-          // First time seeing this track - seed likers without notifying
           stats.likers = await this.api.getTrackLikers(trackId);
         }
 
@@ -631,7 +572,7 @@ class AccountWatcher {
 
       this.data.track_stats = newStats;
     } else {
-      console.log("Failed to fetch tracks, keeping previous stats");
+      this.log("Failed to fetch tracks, keeping previous stats");
     }
 
     this.save();
@@ -644,7 +585,11 @@ class AccountWatcher {
 class ArtistTracker {
   data: ArtistsState;
 
-  constructor(private api: SoundCloudAPI) {
+  constructor(
+    private api: SoundCloudAPI,
+    private dormantDays: number,
+    private log: (...args: any[]) => void
+  ) {
     this.data = readJson<ArtistsState>(ARTISTS_DATA, {
       artists: {},
       updated_at: null,
@@ -658,7 +603,7 @@ class ArtistTracker {
 
   private isDormant(artist: ArtistData): boolean {
     const days = daysSince(artist.last_upload ?? "");
-    return days !== null && days > DORMANT_DAYS;
+    return days !== null && days > this.dormantDays;
   }
 
   private shouldSkip(artist: ArtistData): boolean {
@@ -667,10 +612,6 @@ class ArtistTracker {
     return days !== null && days < DORMANT_CHECK_INTERVAL_DAYS;
   }
 
-  /**
-   * Check all tracked artists for new releases.
-   * API calls: 1 per active artist, 1 per dormant artist due for check, 0 for skipped.
-   */
   async checkReleases(): Promise<ReleaseNotification[]> {
     const notifications: ReleaseNotification[] = [];
     let checked = 0;
@@ -715,7 +656,6 @@ class ArtistTracker {
         }
       }
 
-      // Prune old track IDs to prevent unbounded growth
       const ids = this.data.artists[username].known_track_ids ?? [];
       if (ids.length > MAX_KNOWN_TRACKS) {
         this.data.artists[username].known_track_ids = ids.slice(-MAX_KNOWN_TRACKS);
@@ -725,7 +665,7 @@ class ArtistTracker {
     const dormantCount = Object.values(this.data.artists).filter((a) =>
       this.isDormant(a)
     ).length;
-    console.log(
+    this.log(
       `Checked ${checked} artists, skipped ${skipped} dormant, ${dormantCount} total dormant`
     );
 
@@ -733,7 +673,6 @@ class ArtistTracker {
     return notifications;
   }
 
-  /** Add an artist to tracking. Seeds known tracks to avoid false notifications. */
   async add(username: string): Promise<string> {
     const user = await this.api.resolve(username);
     if (!user) return `Could not find user: ${username}`;
@@ -780,7 +719,6 @@ class ArtistTracker {
     return `Added ${user.full_name || username} (${followers.toLocaleString()} followers, ${tracks.length} tracks)`;
   }
 
-  /** Remove an artist from tracking. */
   remove(username: string): string {
     const key = username.toLowerCase();
     for (const [k, artist] of Object.entries(this.data.artists)) {
@@ -794,161 +732,153 @@ class ArtistTracker {
     return `Artist '${username}' not found`;
   }
 
-  /** Print all tracked artists sorted by follower count. */
-  list(): void {
+  list(): string {
     const artists = Object.values(this.data.artists).sort(
       (a, b) => (b.followers ?? 0) - (a.followers ?? 0)
     );
-    console.log(`\n=== Tracked Artists (${artists.length}) ===\n`);
+    const lines: string[] = [];
+    lines.push(`\n=== Tracked Artists (${artists.length}) ===\n`);
     for (const a of artists) {
       const dormant = this.isDormant(a);
       const status = dormant ? " [DORMANT]" : "";
-      console.log(`${a.display_name} (@${a.username})${status}`);
-      console.log(
+      lines.push(`${a.display_name} (@${a.username})${status}`);
+      lines.push(
         `  ${(a.followers ?? 0).toLocaleString()} followers | ${a.track_count ?? 0} tracks`
       );
-      if (a.last_upload) console.log(`  Last upload: ${a.last_upload.slice(0, 10)}`);
-      console.log();
+      if (a.last_upload) lines.push(`  Last upload: ${a.last_upload.slice(0, 10)}`);
+      lines.push("");
     }
+    return lines.join("\n");
   }
 }
 
-// -- Notification Delivery ----------------------------------------------------
+// =============================================================================
+// EXPORTED FACADE
+// =============================================================================
 
-/**
- * Send notification via gateway.
- * To use a different system (email, Discord webhook, Pushover, etc.),
- * replace the body of this function with your preferred delivery mechanism.
- */
-async function sendNotification(message: string): Promise<boolean> {
-  if (!NOTIFICATIONS_ENABLED) return false;
+export class SoundCloudWatcher {
+  private config: Config;
+  private api: SoundCloudAPI;
+  private myTracksLimit: number;
+  private dormantDays: number;
+  private log: (...args: any[]) => void;
 
-  let token: string;
-  let port: number;
-  try {
-    const cfg = JSON.parse(fs.readFileSync(GATEWAY_CONFIG, "utf-8"));
-    token = cfg.gateway.auth.token;
-    port = cfg.gateway.port ?? GATEWAY_PORT_DEFAULT;
-  } catch (e) {
-    console.log(`Gateway config error: ${e}`);
-    return false;
+  constructor(opts: SoundCloudWatcherConfig) {
+    this.log = opts.logger ?? console.log;
+    this.myTracksLimit = opts.myTracksLimit ?? 10;
+    this.dormantDays = opts.dormantDays ?? 90;
+    this.config = new Config(opts.clientId, opts.clientSecret, opts.username);
+    this.api = new SoundCloudAPI(this.config, this.log);
   }
 
-  try {
-    const resp = await fetch(`http://127.0.0.1:${port}${GATEWAY_ENDPOINT}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        tool: GATEWAY_TOOL_NAME,
-        args: { sessionKey: GATEWAY_SESSION_KEY, message },
-      }),
-      signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS),
-    });
-    return resp.ok;
-  } catch (e) {
-    console.log(`Notification failed: ${e}`);
-    return false;
-  }
-}
-
-// -- Commands -----------------------------------------------------------------
-
-async function runFullCheck(
-  api: SoundCloudAPI,
-  config: Config
-): Promise<[string[], ReleaseNotification[]]> {
-  const account = new AccountWatcher(api, config);
-  const tracker = new ArtistTracker(api);
-  return [await account.check(), await tracker.checkReleases()];
-}
-
-async function main(): Promise<void> {
-  const config = Config.load();
-
-  if (!config.clientId) {
-    console.log(`Error: No SOUNDCLOUD_CLIENT_ID found in ${CONFIG_FILE}`);
-    console.log(`\nCreate the config file with:`);
-    console.log(`  mkdir -p ${path.dirname(CONFIG_FILE)}`);
-    console.log(`  cat > ${CONFIG_FILE} << 'EOF'`);
-    console.log(`  SOUNDCLOUD_CLIENT_ID=your_id`);
-    console.log(`  SOUNDCLOUD_CLIENT_SECRET=your_secret`);
-    console.log(`  MY_USERNAME=${MY_USERNAME}`);
-    console.log(`  EOF`);
-    return;
-  }
-
-  const api = new SoundCloudAPI(config);
-
-  if (!config.accessToken) {
-    if (!(await api.refreshToken())) {
-      console.log("Failed to get access token");
-      return;
+  private async ensureToken(): Promise<string | null> {
+    if (this.config.accessToken) return null;
+    if (!(await this.api.refreshToken())) {
+      return "Failed to get access token. Check your clientId and clientSecret.";
     }
+    return null;
   }
 
-  const args = process.argv.slice(2);
-  const cmd = args[0];
+  async status(): Promise<string> {
+    const account = new AccountWatcher(this.api, this.config, this.myTracksLimit, this.log);
+    const tracker = new ArtistTracker(this.api, this.dormantDays, this.log);
 
-  if (!cmd) {
-    console.log("SoundCloud Watcher");
-    console.log();
-    console.log("Commands:");
-    console.log("  status          Show current tracking status");
-    console.log("  check           Run full check with verbose output");
-    console.log("  cron            Silent mode - only sends notifications on updates");
-    console.log("  add <user>      Add artist(s) to track");
-    console.log("  remove <user>   Remove artist from tracking");
-    console.log("  list            List all tracked artists");
-    return;
-  }
-
-  if (cmd === "status") {
-    const account = new AccountWatcher(api, config);
-    const tracker = new ArtistTracker(api);
-
-    console.log("=== SoundCloud Watcher Status ===\n");
-    console.log(`Config: ${CONFIG_FILE}`);
-    console.log(
-      config.accessToken
-        ? `Token: ...${config.accessToken.slice(-8)}`
+    const lines: string[] = [];
+    lines.push("=== SoundCloud Watcher Status ===\n");
+    lines.push(`Config: ${CONFIG_FILE}`);
+    lines.push(
+      this.config.accessToken
+        ? `Token: ...${this.config.accessToken.slice(-8)}`
         : "Token: None"
     );
     if (account.data.my_account) {
-      console.log(`Account: @${account.data.my_account.username}`);
-      console.log(
+      lines.push(`Account: @${account.data.my_account.username}`);
+      lines.push(
         `Followers: ${account.data.follower_count || Object.keys(account.data.my_followers).length}`
       );
     }
     const total = Object.keys(tracker.data.artists).length;
     const dormant = Object.values(tracker.data.artists).filter(
-      (a) => (daysSince(a.last_upload ?? "") ?? 0) > DORMANT_DAYS
+      (a) => (daysSince(a.last_upload ?? "") ?? 0) > this.dormantDays
     ).length;
-    console.log(
+    lines.push(
       `Tracked artists: ${total} (${total - dormant} active, ${dormant} dormant)`
     );
-    console.log(
-      `Notifications: ${NOTIFICATIONS_ENABLED ? "gateway" : "stdout only"}`
-    );
-    console.log(`Last check: ${account.data.last_check ?? "Never"}`);
-  } else if (cmd === "check") {
-    console.log(`[${utcnow()}] Running full check...\n`);
+    lines.push(`Last check: ${account.data.last_check ?? "Never"}`);
+    return lines.join("\n");
+  }
 
-    const [accountNotifs, releases] = await runFullCheck(api, config);
+  async check(): Promise<string> {
+    const tokenErr = await this.ensureToken();
+    if (tokenErr) return tokenErr;
 
-    console.log("--- Account ---");
-    for (const n of accountNotifs) console.log(`  ${n}`);
-    if (!accountNotifs.length) console.log("  No updates");
+    const account = new AccountWatcher(this.api, this.config, this.myTracksLimit, this.log);
+    const tracker = new ArtistTracker(this.api, this.dormantDays, this.log);
 
-    console.log("\n--- Artist Releases ---");
-    for (const r of releases) console.log(`  ${r.artist}: ${r.title}`);
-    if (!releases.length) console.log("  No new releases");
+    const [accountNotifs, releases] = await Promise.all([
+      account.check(),
+      tracker.checkReleases(),
+    ]);
 
-    console.log(`\nAPI calls: ${api.calls}`);
-  } else if (cmd === "cron") {
-    const [accountNotifs, releases] = await runFullCheck(api, config);
+    const lines: string[] = [];
+    lines.push(`[${utcnow()}] Full check complete\n`);
+
+    lines.push("--- Account ---");
+    for (const n of accountNotifs) lines.push(`  ${n}`);
+    if (!accountNotifs.length) lines.push("  No updates");
+
+    lines.push("\n--- Artist Releases ---");
+    for (const r of releases) lines.push(`  ${r.artist}: ${r.title}`);
+    if (!releases.length) lines.push("  No new releases");
+
+    lines.push(`\nAPI calls: ${this.api.calls}`);
+    return lines.join("\n");
+  }
+
+  async addArtist(username: string): Promise<string> {
+    const tokenErr = await this.ensureToken();
+    if (tokenErr) return tokenErr;
+
+    const tracker = new ArtistTracker(this.api, this.dormantDays, this.log);
+    return tracker.add(username);
+  }
+
+  async addArtists(usernames: string[]): Promise<string> {
+    const tokenErr = await this.ensureToken();
+    if (tokenErr) return tokenErr;
+
+    const tracker = new ArtistTracker(this.api, this.dormantDays, this.log);
+    const results: string[] = [];
+    for (const username of usernames) {
+      results.push(await tracker.add(username));
+    }
+    return results.join("\n");
+  }
+
+  async removeArtist(username: string): Promise<string> {
+    const tracker = new ArtistTracker(this.api, this.dormantDays, this.log);
+    return tracker.remove(username);
+  }
+
+  async listArtists(): Promise<string> {
+    const tracker = new ArtistTracker(this.api, this.dormantDays, this.log);
+    return tracker.list();
+  }
+
+  async runCron(): Promise<string | null> {
+    const tokenErr = await this.ensureToken();
+    if (tokenErr) {
+      this.log(tokenErr);
+      return null;
+    }
+
+    const account = new AccountWatcher(this.api, this.config, this.myTracksLimit, this.log);
+    const tracker = new ArtistTracker(this.api, this.dormantDays, this.log);
+
+    const [accountNotifs, releases] = await Promise.all([
+      account.check(),
+      tracker.checkReleases(),
+    ]);
 
     const lines: string[] = [];
     if (accountNotifs.length) {
@@ -966,33 +896,9 @@ async function main(): Promise<void> {
     }
 
     if (lines.length) {
-      const message = "SoundCloud updates:\n\n" + lines.join("\n");
-      if (NOTIFICATIONS_ENABLED) {
-        await sendNotification(message);
-      } else {
-        console.log(message);
-      }
+      return "SoundCloud updates:\n\n" + lines.join("\n");
     }
 
-    console.log(`API calls: ${api.calls}`);
-  } else if (cmd === "add" && args.length > 1) {
-    const tracker = new ArtistTracker(api);
-    for (const username of args.slice(1)) {
-      console.log(await tracker.add(username));
-    }
-  } else if (cmd === "remove" && args.length > 1) {
-    const tracker = new ArtistTracker(api);
-    console.log(tracker.remove(args[1]));
-  } else if (cmd === "list") {
-    const tracker = new ArtistTracker(api);
-    tracker.list();
-  } else {
-    console.log(`Unknown command: ${cmd}`);
-    console.log("Run without arguments for usage info.");
+    return null;
   }
 }
-
-main().catch((e) => {
-  console.error(`Fatal error: ${e}`);
-  process.exit(1);
-});
