@@ -90,7 +90,6 @@ Not configured yet.
 
 2. Create config file:
 \`\`\`bash
-mkdir -p ~/.openclaw/secrets
 nano ~/.openclaw/secrets/soundcloud.env
 \`\`\`
 
@@ -179,5 +178,5 @@ MY_USERNAME=your_soundcloud_username
     },
   });
 
-  logger.info?.('SoundCloud Watcher plugin loaded') || console.log('SoundCloud Watcher plugin loaded');
+  (logger.info ?? console.log).call(logger, 'SoundCloud Watcher plugin loaded');
 }
