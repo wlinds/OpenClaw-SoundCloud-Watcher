@@ -2,51 +2,5 @@
   "id": "soundcloud-watcher",
   "name": "SoundCloud Watcher",
   "description": "Monitor your SoundCloud account and track artist releases",
-  "version": "1.0.0",
-  "configSchema": {
-    "type": "object",
-    "additionalProperties": false,
-    "properties": {
-      "enabled": {
-        "type": "boolean",
-        "default": true,
-        "description": "Enable/disable the SoundCloud watcher"
-      },
-      "clientId": {
-        "type": "string",
-        "description": "SoundCloud API Client ID"
-      },
-      "clientSecret": {
-        "type": "string",
-        "description": "SoundCloud API Client Secret"
-      },
-      "username": {
-        "type": "string",
-        "description": "Your SoundCloud username (URL slug)"
-      },
-      "checkIntervalHours": {
-        "type": "number",
-        "default": 6,
-        "minimum": 1,
-        "maximum": 24,
-        "description": "How often to check for updates (in hours)"
-      },
-      "myTracksLimit": {
-        "type": "number",
-        "default": 10,
-        "description": "Number of your tracks to monitor"
-      },
-      "dormantDays": {
-        "type": "number",
-        "default": 90,
-        "description": "Days before an artist is considered dormant"
-      },
-      "sessionKey": {
-        "type": "string",
-        "default": "agent:main:main",
-        "description": "OpenClaw session key for notifications (e.g., 'agent:main:main', 'telegram:chat123', etc.)"
-      }
-    },
-    "required": []
-  }
+  "version": "2.0.0"
 }
