@@ -73,6 +73,24 @@ Then in chat:
 | `/soundcloud-remove <username>` | Stop tracking an artist |
 | `/soundcloud-list` | List all tracked artists |
 
+## Automated Checking
+
+The plugin responds to commands but doesn't auto-poll. Set up a cron job for automatic notifications:
+
+```bash
+openclaw cron add --name "soundcloud-check" \
+  --every 6h \
+  --isolated \
+  --message "Run /soundcloud-check and notify me of any new followers, likes, reposts, or artist releases."
+```
+
+This runs every 6 hours in an isolated session and notifies you of changes.
+
+**Alternative:** Add to your `HEARTBEAT.md`:
+```markdown
+- [ ] Run /soundcloud-check if not checked in last 6 hours
+```
+
 ## File Locations
 
 | File | Purpose |
