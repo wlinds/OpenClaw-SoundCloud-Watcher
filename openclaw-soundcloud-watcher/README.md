@@ -68,7 +68,8 @@ Then in chat:
 |---------|-------------|
 | `/soundcloud-setup` | Show setup instructions and config status |
 | `/soundcloud-status` | Show tracking status and account info |
-| `/soundcloud-check` | Run immediate check for updates |
+| `/soundcloud-check` | Run immediate check (verbose output) |
+| `/soundcloud-cron` | Run check for automation (silent if no updates) |
 | `/soundcloud-add <username>` | Track artist(s) - space-separated |
 | `/soundcloud-remove <username>` | Stop tracking an artist |
 | `/soundcloud-list` | List all tracked artists |
@@ -81,14 +82,16 @@ The plugin responds to commands but doesn't auto-poll. Set up a cron job for aut
 openclaw cron add --name "soundcloud-check" \
   --every 6h \
   --isolated \
-  --message "Run /soundcloud-check and notify me of any new followers, likes, reposts, or artist releases."
+  --message "Run /soundcloud-cron and forward any updates to me on Telegram."
 ```
 
-This runs every 6 hours in an isolated session and notifies you of changes.
+Uses `/soundcloud-cron` which:
+- Returns updates only (silent if nothing new)
+- Logs errors but doesn't spam on config issues
 
 **Alternative:** Add to your `HEARTBEAT.md`:
 ```markdown
-- [ ] Run /soundcloud-check if not checked in last 6 hours
+- [ ] Run /soundcloud-cron if not checked in last 6 hours
 ```
 
 ## File Locations
