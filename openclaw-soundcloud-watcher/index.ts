@@ -178,5 +178,29 @@ MY_USERNAME=your_soundcloud_username
     },
   });
 
+  api.registerCommand({
+    name: 'soundcloud-cron',
+    description: 'Run check for cron (only outputs if there are updates)',
+    handler: async () => {
+      const w = getWatcher();
+      if (!w) {
+        (logger.warn ?? console.warn).call(logger, 'SoundCloud cron: not configured');
+        return { text: '' };  // Silent fail for cron
+      }
+      try {
+        const result = await w.runCron();
+        if (result) {
+          return { text: result };
+        }
+        // No updates - return empty (silent success)
+        (logger.debug ?? console.log).call(logger, 'SoundCloud cron: no updates');
+        return { text: '' };
+      } catch (e) {
+        (logger.error ?? console.error).call(logger, 'SoundCloud cron error:', e);
+        return { text: `SoundCloud check failed: ${e}` };
+      }
+    },
+  });
+
   (logger.info ?? console.log).call(logger, 'SoundCloud Watcher plugin loaded');
 }
