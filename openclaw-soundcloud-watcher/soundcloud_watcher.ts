@@ -56,12 +56,24 @@ export interface SoundCloudWatcherConfig {
   username: string;
   myTracksLimit?: number;
   dormantDays?: number;
+  includeLinks?: boolean;  // Include URLs in notifications (default: true)
   logger?: (...args: any[]) => void;
 }
 
 interface UserInfo {
   username: string;
   display_name: string;
+  permalink_url?: string;
+}
+
+interface FollowerNotification {
+  type: 'new' | 'lost';
+  users: UserInfo[];
+}
+
+interface AccountNotifications {
+  followers: FollowerNotification[];
+  engagement: string[];  // likes, reposts, etc.
 }
 
 interface TrackStats {
@@ -396,9 +408,11 @@ class SoundCloudAPI {
 
       for (const f of data.collection ?? []) {
         if (f && typeof f === "object" && "id" in f) {
+          const permalink = f.permalink ?? f.username ?? "unknown";
           followers[String(f.id)] = {
-            username: f.permalink ?? f.username ?? "unknown",
+            username: permalink,
             display_name: f.full_name ?? f.username ?? "unknown",
+            permalink_url: f.permalink_url ?? `https://soundcloud.com/${permalink}`,
           };
         }
       }
@@ -442,12 +456,12 @@ class AccountWatcher {
     writeJson(ACCOUNT_DATA, this.data);
   }
 
-  async check(): Promise<string[]> {
-    const notifications: string[] = [];
+  async check(): Promise<AccountNotifications> {
+    const result: AccountNotifications = { followers: [], engagement: [] };
 
     if (!this.data.my_account) {
       const user = await this.api.resolve(this.config.myUsername);
-      if (!user) return ["Failed to resolve SoundCloud user"];
+      if (!user) return result;
       this.data.my_account = {
         user_id: user.id,
         username: user.permalink ?? this.config.myUsername,
@@ -459,7 +473,7 @@ class AccountWatcher {
     const profile = await this.api.getUser(userId);
     if (!profile) {
       this.log("Failed to fetch profile, skipping account check");
-      return notifications;
+      return result;
     }
 
     const currentCount = num(profile.followers_count);
@@ -479,23 +493,16 @@ class AccountWatcher {
         if (Object.keys(stored).length) {
           const newFollowers = Object.entries(currentFollowers)
             .filter(([uid]) => !stored[uid])
-            .map(([, f]) => f.display_name);
+            .map(([, f]) => f);
           const lostFollowers = Object.entries(stored)
             .filter(([uid]) => !currentFollowers[uid])
-            .map(([, f]) => f.display_name);
+            .map(([, f]) => f);
 
           if (newFollowers.length) {
-            let names = newFollowers.slice(0, 3).join(", ");
-            if (newFollowers.length > 3) names += ` +${newFollowers.length - 3} more`;
-            notifications.push(
-              `New follower${newFollowers.length > 1 ? "s" : ""}: **${names}**`
-            );
+            result.followers.push({ type: 'new', users: newFollowers });
           }
           if (lostFollowers.length) {
-            const names = lostFollowers.slice(0, 3).join(", ");
-            notifications.push(
-              `Lost follower${lostFollowers.length > 1 ? "s" : ""}: ${names}`
-            );
+            result.followers.push({ type: 'lost', users: lostFollowers });
           }
         }
 
@@ -550,11 +557,11 @@ class AccountWatcher {
               let names = newLikerNames.slice(0, 3).join(", ");
               if (newLikerNames.length > 3)
                 names += ` +${newLikerNames.length - 3} more`;
-              notifications.push(`**${names}** liked '${title}'`);
+              result.engagement.push(`**${names}** liked '${title}'`);
             }
             if (unlikerNames.length) {
               const names = unlikerNames.slice(0, 3).join(", ");
-              notifications.push(`${names} unliked '${title}'`);
+              result.engagement.push(`${names} unliked '${title}'`);
             }
           } else {
             stats.likers = prevLikers;
@@ -562,7 +569,7 @@ class AccountWatcher {
 
           const newReposts = currentReposts - (prev.reposts ?? 0);
           if (newReposts > 0) {
-            notifications.push(
+            result.engagement.push(
               `'${title}' got ${newReposts} repost${newReposts > 1 ? "s" : ""}!`
             );
           }
@@ -579,7 +586,7 @@ class AccountWatcher {
     }
 
     this.save();
-    return notifications;
+    return result;
   }
 }
 
@@ -764,12 +771,14 @@ export class SoundCloudWatcher {
   private api: SoundCloudAPI;
   private myTracksLimit: number;
   private dormantDays: number;
+  private includeLinks: boolean;
   private log: (...args: any[]) => void;
 
   constructor(opts: SoundCloudWatcherConfig) {
     this.log = opts.logger ?? console.log;
     this.myTracksLimit = opts.myTracksLimit ?? 10;
     this.dormantDays = opts.dormantDays ?? 90;
+    this.includeLinks = opts.includeLinks ?? true;  // Default: include links
     this.config = new Config(opts.clientId, opts.clientSecret, opts.username);
     this.api = new SoundCloudAPI(this.config, this.log);
   }
@@ -827,11 +836,24 @@ export class SoundCloudWatcher {
     lines.push(`[${utcnow()}] Full check complete\n`);
 
     lines.push("--- Account ---");
-    for (const n of accountNotifs) lines.push(`  ${n}`);
-    if (!accountNotifs.length) lines.push("  No updates");
+    for (const fn of accountNotifs.followers) {
+      lines.push(...this.formatFollowerNotification(fn).map(l => `  ${l}`));
+    }
+    for (const e of accountNotifs.engagement) {
+      lines.push(`  ${e}`);
+    }
+    if (!accountNotifs.followers.length && !accountNotifs.engagement.length) {
+      lines.push("  No updates");
+    }
 
     lines.push("\n--- Artist Releases ---");
-    for (const r of releases) lines.push(`  ${r.artist}: ${r.title}`);
+    for (const r of releases) {
+      if (this.includeLinks && r.url) {
+        lines.push(`  ${r.artist}: ${r.title} - ${r.url}`);
+      } else {
+        lines.push(`  ${r.artist}: ${r.title}`);
+      }
+    }
     if (!releases.length) lines.push("  No new releases");
 
     lines.push(`\nAPI calls: ${this.api.calls}`);
@@ -868,6 +890,34 @@ export class SoundCloudWatcher {
     return tracker.list();
   }
 
+  private formatFollowerNotification(notif: FollowerNotification): string[] {
+    const lines: string[] = [];
+    const users = notif.users.slice(0, 5);  // Max 5 users shown
+    const remaining = notif.users.length - users.length;
+    
+    if (notif.type === 'new') {
+      lines.push(`New follower${notif.users.length > 1 ? 's' : ''}:`);
+      for (const u of users) {
+        if (this.includeLinks && u.permalink_url) {
+          lines.push(`- **${u.display_name}**: ${u.permalink_url}`);
+        } else {
+          lines.push(`- **${u.display_name}**`);
+        }
+      }
+    } else {
+      lines.push(`Lost follower${notif.users.length > 1 ? 's' : ''}:`);
+      for (const u of users) {
+        lines.push(`- ${u.display_name}`);
+      }
+    }
+    
+    if (remaining > 0) {
+      lines.push(`  ...and ${remaining} more`);
+    }
+    
+    return lines;
+  }
+
   async runCron(): Promise<string | null> {
     const tokenErr = await this.ensureToken();
     if (tokenErr) {
@@ -884,16 +934,31 @@ export class SoundCloudWatcher {
     ]);
 
     const lines: string[] = [];
-    if (accountNotifs.length) {
+    
+    // Format follower notifications
+    const hasFollowerUpdates = accountNotifs.followers.length > 0;
+    const hasEngagement = accountNotifs.engagement.length > 0;
+    
+    if (hasFollowerUpdates || hasEngagement) {
       lines.push("**Account:**");
-      lines.push(...accountNotifs.map((n) => `- ${n}`));
+      for (const fn of accountNotifs.followers) {
+        lines.push(...this.formatFollowerNotification(fn));
+      }
+      for (const e of accountNotifs.engagement) {
+        lines.push(`- ${e}`);
+      }
       lines.push("");
     }
+    
     if (releases.length) {
       lines.push("**New Releases:**");
       for (const r of releases) {
-        lines.push(`- **${r.artist}** dropped: ${r.title}`);
-        lines.push(`  ${r.url}`);
+        if (this.includeLinks && r.url) {
+          lines.push(`- **${r.artist}** dropped: ${r.title}`);
+          lines.push(`  ${r.url}`);
+        } else {
+          lines.push(`- **${r.artist}** dropped: ${r.title}`);
+        }
       }
       lines.push("");
     }

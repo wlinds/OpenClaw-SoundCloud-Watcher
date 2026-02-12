@@ -10,6 +10,7 @@ interface PluginConfig {
   checkIntervalHours: number;
   myTracksLimit: number;
   dormantDays: number;
+  includeLinks: boolean;
   sessionKey?: string;
 }
 
@@ -34,6 +35,7 @@ function loadConfig(): PluginConfig | null {
         checkIntervalHours: 6,
         myTracksLimit: 10,
         dormantDays: 90,
+        includeLinks: env.INCLUDE_LINKS !== 'false',  // Default: true
         sessionKey: 'agent:main:main',
       };
     }
@@ -57,6 +59,7 @@ export default function register(api: any) {
       username: config.username,
       myTracksLimit: config.myTracksLimit,
       dormantDays: config.dormantDays,
+      includeLinks: config.includeLinks,
       logger: (...args: any[]) => logger.debug?.(...args) || console.log(...args),
     });
     return watcher;

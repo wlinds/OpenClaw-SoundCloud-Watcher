@@ -48,6 +48,9 @@ Add your credentials:
 SOUNDCLOUD_CLIENT_ID=your_client_id
 SOUNDCLOUD_CLIENT_SECRET=your_client_secret
 MY_USERNAME=your_soundcloud_username
+
+# Optional settings
+INCLUDE_LINKS=true   # Include URLs in notifications (default: true)
 ```
 
 ### 4. Restart & Verify
