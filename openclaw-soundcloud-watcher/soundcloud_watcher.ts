@@ -25,6 +25,7 @@ const CONFIG_FILE = path.join(OPENCLAW_DIR, "secrets", "soundcloud.env");
 const ACCOUNT_DATA = path.join(OPENCLAW_DIR, "data", "soundcloud_tracking.json");
 const ARTISTS_DATA = path.join(OPENCLAW_DIR, "data", "artists.json");
 const BACKOFF_FILE = path.join(OPENCLAW_DIR, "soundcloud_backoff.json");
+const TOKEN_BACKOFF_FILE = path.join(OPENCLAW_DIR, "soundcloud_token_backoff.json");
 
 // =============================================================================
 // TUNING
@@ -39,6 +40,13 @@ const FOLLOWERS_PAGE_SIZE = 200;
 
 const BACKOFF_BASE_SECONDS = 300;
 const BACKOFF_MAX_SECONDS = 7200;
+
+// Token refresh has lower backoff - it's critical for operation
+const TOKEN_BACKOFF_BASE_SECONDS = 60;
+const TOKEN_BACKOFF_MAX_SECONDS = 300;  // 5 min max, not 2 hours
+
+// Proactive refresh buffer (refresh 5 min before expiry)
+const TOKEN_REFRESH_BUFFER_SECONDS = 300;
 
 const API_TIMEOUT_MS = 15_000;
 
@@ -227,6 +235,7 @@ class SoundCloudAPI {
     private log: (...args: any[]) => void
   ) {}
 
+  // -- API rate limit backoff (for 429s on regular API calls) --
   private checkBackoff(): number | null {
     const data = readJson<{ last_fail?: number; fail_count?: number }>(
       BACKOFF_FILE,
@@ -257,16 +266,75 @@ class SoundCloudAPI {
     if (fs.existsSync(BACKOFF_FILE)) fs.unlinkSync(BACKOFF_FILE);
   }
 
-  async refreshToken(): Promise<boolean> {
+  // -- Token refresh backoff (separate, shorter max) --
+  private checkTokenBackoff(): number | null {
+    const data = readJson<{ last_fail?: number; fail_count?: number }>(
+      TOKEN_BACKOFF_FILE,
+      {}
+    );
+    if (!data.last_fail) return null;
+    const elapsed = Date.now() / 1000 - data.last_fail;
+    const backoff = Math.min(
+      TOKEN_BACKOFF_BASE_SECONDS * 2 ** (data.fail_count ?? 0),
+      TOKEN_BACKOFF_MAX_SECONDS
+    );
+    return elapsed < backoff ? Math.floor(backoff - elapsed) : null;
+  }
+
+  private setTokenBackoff(): void {
+    try {
+      const data = readJson<{ fail_count?: number }>(TOKEN_BACKOFF_FILE, {});
+      writeJson(TOKEN_BACKOFF_FILE, {
+        fail_count: (data.fail_count ?? 0) + 1,
+        last_fail: Date.now() / 1000,
+      });
+    } catch {
+      /* best effort */
+    }
+  }
+
+  private clearTokenBackoff(): void {
+    if (fs.existsSync(TOKEN_BACKOFF_FILE)) fs.unlinkSync(TOKEN_BACKOFF_FILE);
+  }
+
+  // -- JWT helpers for proactive refresh --
+  private getTokenExpiry(): number | null {
+    const token = this.config.accessToken;
+    if (!token) return null;
+    try {
+      const parts = token.split(".");
+      if (parts.length !== 3) return null;
+      const payload = JSON.parse(Buffer.from(parts[1], "base64").toString());
+      return payload.exp ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  private isTokenExpiringSoon(): boolean {
+    const exp = this.getTokenExpiry();
+    if (!exp) return true; // No token or can't decode = refresh
+    const now = Date.now() / 1000;
+    return now > exp - TOKEN_REFRESH_BUFFER_SECONDS;
+  }
+
+  // -- Token refresh (with separate backoff, proactive check) --
+  async refreshToken(force = false): Promise<boolean> {
     if (!this.config.clientId || !this.config.clientSecret) return false;
 
-    const remaining = this.checkBackoff();
-    if (remaining) {
-      this.log(`Token refresh in backoff (${remaining}s remaining)`);
+    // Skip if token is still valid (unless forced, e.g., on 401)
+    if (!force && !this.isTokenExpiringSoon()) {
+      return true; // Token still good
+    }
+
+    const remaining = this.checkTokenBackoff();
+    if (remaining && !force) {
+      this.log(`Token refresh in backoff (${remaining}s remaining), skipping`);
       return false;
     }
 
     try {
+      this.log("Refreshing token...");
       const body = new URLSearchParams({
         grant_type: "client_credentials",
         client_id: this.config.clientId,
@@ -279,23 +347,33 @@ class SoundCloudAPI {
         signal: AbortSignal.timeout(API_TIMEOUT_MS),
       });
       if (resp.status === 429) {
-        this.setBackoff();
+        this.setTokenBackoff();
         this.log("Token refresh rate limited (429)");
         return false;
       }
       if (!resp.ok) {
+        this.setTokenBackoff();
         this.log(`Token refresh failed: ${resp.status}`);
         return false;
       }
       const result = (await resp.json()) as { access_token: string };
       this.config.saveToken(result.access_token);
-      this.clearBackoff();
-      this.log("Token refreshed");
+      this.clearTokenBackoff();
+      this.log("Token refreshed successfully");
       return true;
     } catch (e) {
-      this.log(`Token refresh failed: ${e}`);
+      this.setTokenBackoff();
+      this.log(`Token refresh error: ${e}`);
       return false;
     }
+  }
+
+  // Proactive check - call before making API requests
+  async ensureValidToken(): Promise<boolean> {
+    if (this.isTokenExpiringSoon()) {
+      return this.refreshToken(false);
+    }
+    return true;
   }
 
   async get(
@@ -332,7 +410,8 @@ class SoundCloudAPI {
       });
 
       if (resp.status === 401 && retry) {
-        if (await this.refreshToken()) {
+        this.log("Got 401, forcing token refresh...");
+        if (await this.refreshToken(true)) {  // force=true bypasses backoff
           return this.get(url, params, false);
         }
       }
@@ -784,9 +863,9 @@ export class SoundCloudWatcher {
   }
 
   private async ensureToken(): Promise<string | null> {
-    if (this.config.accessToken) return null;
-    if (!(await this.api.refreshToken())) {
-      return "Failed to get access token. Check your clientId and clientSecret.";
+    // Proactive refresh: check if token exists AND is not expiring soon
+    if (!(await this.api.ensureValidToken())) {
+      return "Failed to get/refresh access token. Check your clientId and clientSecret.";
     }
     return null;
   }
