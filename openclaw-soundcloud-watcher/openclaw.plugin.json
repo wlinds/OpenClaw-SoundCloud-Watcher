@@ -2,7 +2,7 @@
   "id": "soundcloud-watcher",
   "name": "SoundCloud Watcher",
   "description": "Monitor your SoundCloud account and track artist releases",
-  "version": "2.2.3",
+  "version": "2.2.4",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

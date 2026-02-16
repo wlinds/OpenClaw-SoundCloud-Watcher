@@ -1,6 +1,6 @@
 {
   "name": "@akilles/soundcloud-watcher",
-  "version": "2.2.3",
+  "version": "2.2.4",
   "description": "OpenClaw plugin to monitor SoundCloud account and track artist releases",
   "main": "index.ts",
   "openclaw": {
@@ -39,13 +39,11 @@
     "README.md",
     "LICENSE"
   ],
-  "peerDependencies": {
-    "@types/node": "^22.0.0"
-  },
   "engines": {
     "node": ">=22.0.0"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "typescript": "^5.9.3"
   }
 }
