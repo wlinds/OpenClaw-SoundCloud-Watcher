@@ -1,6 +1,6 @@
 {
   "name": "@akilles/soundcloud-watcher",
-  "version": "2.2.2",
+  "version": "2.2.3",
   "description": "OpenClaw plugin to monitor SoundCloud account and track artist releases",
   "main": "index.ts",
   "openclaw": {

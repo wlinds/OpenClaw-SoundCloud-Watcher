@@ -62,5 +62,5 @@ For automation, add a cron:
 openclaw cron add --name "soundcloud-check" \
   --every 6h \
   --isolated \
-  --message "Run /soundcloud-cron and forward any updates to me on Telegram."
+  --message "Run /soundcloud-cron and forward any updates to me."
 ```

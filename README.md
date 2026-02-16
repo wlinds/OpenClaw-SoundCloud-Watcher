@@ -82,7 +82,7 @@ The plugin responds to commands but doesn't auto-poll. Set up a cron job for aut
 openclaw cron add --name "soundcloud-check" \
   --every 6h \
   --isolated \
-  --message "Run /soundcloud-cron and forward any updates to me on Telegram."
+  --message "Run /soundcloud-cron and forward any updates to me."
 ```
 
 Uses `/soundcloud-cron` which:
