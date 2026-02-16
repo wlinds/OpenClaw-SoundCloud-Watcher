@@ -1,20 +1,14 @@
 ---
 name: soundcloud-watcher
-display_name: SoundCloud Watcher
 description: Monitor your SoundCloud account, track artist releases, and get notified about new followers and likes.
-homepage: https://github.com/wlinds/OpenClaw-SoundCloud-Watcher
-tags:
-  - soundcloud
-  - music
-  - notifications
-  - openclaw-plugin
-requires:
-  env:
-    - SOUNDCLOUD_CLIENT_ID
-    - SOUNDCLOUD_CLIENT_SECRET
-    - MY_USERNAME
-  binaries:
-    - openclaw
+metadata:
+  display_name: SoundCloud Watcher
+  homepage: https://github.com/wlinds/OpenClaw-SoundCloud-Watcher
+  tags:
+    - soundcloud
+    - music
+    - notifications
+    - openclaw-plugin
 ---
 
 # SoundCloud Watcher
