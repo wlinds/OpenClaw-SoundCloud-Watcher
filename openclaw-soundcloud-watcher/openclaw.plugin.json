@@ -2,7 +2,7 @@
   "id": "soundcloud-watcher",
   "name": "SoundCloud Watcher",
   "description": "Monitor your SoundCloud account and track artist releases",
-  "version": "2.1.0",
+  "version": "2.2.1",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -13,5 +13,19 @@
       }
     },
     "required": []
+  },
+  "requires": {
+    "env": [
+      "SOUNDCLOUD_CLIENT_ID",
+      "SOUNDCLOUD_CLIENT_SECRET",
+      "MY_USERNAME"
+    ],
+    "secrets": [
+      "~/.openclaw/secrets/soundcloud.env"
+    ],
+    "data": [
+      "~/.openclaw/data/artists.json",
+      "~/.openclaw/data/soundcloud_tracking.json"
+    ]
   }
 }
