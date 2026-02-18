@@ -75,8 +75,9 @@ interface UserInfo {
 }
 
 interface FollowerNotification {
-  type: 'new' | 'lost';
+  type: 'new' | 'lost' | 'renamed';
   users: UserInfo[];
+  renames?: { old: UserInfo; new: UserInfo }[];  // Only for type 'renamed'
 }
 
 interface AccountNotifications {
@@ -576,12 +577,28 @@ class AccountWatcher {
           const lostFollowers = Object.entries(stored)
             .filter(([uid]) => !currentFollowers[uid])
             .map(([, f]) => f);
+          
+          // Detect name changes for existing followers
+          const renames: { old: UserInfo; new: UserInfo }[] = [];
+          for (const [uid, current] of Object.entries(currentFollowers)) {
+            const prev = stored[uid];
+            if (prev) {
+              const nameChanged = prev.username !== current.username || 
+                                  prev.display_name !== current.display_name;
+              if (nameChanged) {
+                renames.push({ old: prev, new: current });
+              }
+            }
+          }
 
           if (newFollowers.length) {
             result.followers.push({ type: 'new', users: newFollowers });
           }
           if (lostFollowers.length) {
             result.followers.push({ type: 'lost', users: lostFollowers });
+          }
+          if (renames.length) {
+            result.followers.push({ type: 'renamed', users: [], renames });
           }
         }
 
@@ -974,20 +991,34 @@ export class SoundCloudWatcher {
     const users = notif.users.slice(0, 5);  // Max 5 users shown
     const remaining = notif.users.length - users.length;
     
+    // Helper: use display_name if set, otherwise fall back to @username
+    const getName = (u: UserInfo) => u.display_name?.trim() || `@${u.username}`;
+    
     if (notif.type === 'new') {
       lines.push(`New follower${notif.users.length > 1 ? 's' : ''}:`);
       for (const u of users) {
         if (this.includeLinks && u.permalink_url) {
-          lines.push(`- **${u.display_name}**: ${u.permalink_url}`);
+          lines.push(`- **${getName(u)}**: ${u.permalink_url}`);
         } else {
-          lines.push(`- **${u.display_name}**`);
+          lines.push(`- **${getName(u)}**`);
         }
       }
-    } else {
+    } else if (notif.type === 'lost') {
       lines.push(`Lost follower${notif.users.length > 1 ? 's' : ''}:`);
       for (const u of users) {
-        lines.push(`- ${u.display_name}`);
+        lines.push(`- ${getName(u)}`);
       }
+    } else if (notif.type === 'renamed' && notif.renames?.length) {
+      const renames = notif.renames.slice(0, 5);
+      const renameRemaining = (notif.renames?.length ?? 0) - renames.length;
+      lines.push(`Name change${renames.length > 1 ? 's' : ''}:`);
+      for (const r of renames) {
+        lines.push(`- ${getName(r.old)} → ${getName(r.new)}`);
+      }
+      if (renameRemaining > 0) {
+        lines.push(`  ...and ${renameRemaining} more`);
+      }
+      return lines;  // Early return, skip the standard remaining count
     }
     
     if (remaining > 0) {
