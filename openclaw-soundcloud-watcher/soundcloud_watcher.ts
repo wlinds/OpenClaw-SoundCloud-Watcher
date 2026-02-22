@@ -336,14 +336,19 @@ class SoundCloudAPI {
 
     try {
       this.log("Refreshing token...");
+      const basicAuth = Buffer.from(
+        `${this.config.clientId}:${this.config.clientSecret}`
+      ).toString("base64");
       const body = new URLSearchParams({
         grant_type: "client_credentials",
-        client_id: this.config.clientId,
-        client_secret: this.config.clientSecret,
       });
-      const resp = await fetch(`${API_BASE}/oauth2/token`, {
+      const resp = await fetch("https://secure.soundcloud.com/oauth/token", {
         method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Authorization": `Basic ${basicAuth}`,
+          "Accept": "application/json; charset=utf-8",
+        },
         body: body.toString(),
         signal: AbortSignal.timeout(API_TIMEOUT_MS),
       });

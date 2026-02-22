@@ -9,6 +9,7 @@ Monitor your SoundCloud account and track artist releases. Get notified when som
 - **New releases** - Get notifications when tracked artists release new music
 - **Smart API usage** - Only fetches what changed, automatically skips dormant artists
 - **Rate limit handling** - Exponential backoff for API reliability
+- **OAuth 2.1** - Uses SoundCloud's latest authentication endpoint
 
 ## Prerequisites
 
