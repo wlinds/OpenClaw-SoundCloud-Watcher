@@ -34,7 +34,7 @@ const TOKEN_BACKOFF_FILE = path.join(OPENCLAW_DIR, "soundcloud_token_backoff.jso
 const ARTIST_TRACKS_LIMIT = 5;
 const ARTIST_ADD_LIMIT = 50;
 const DORMANT_CHECK_INTERVAL_DAYS = 7;
-const MAX_KNOWN_TRACKS = 50;
+const MAX_KNOWN_TRACKS = 100;
 const MAX_LIKERS_PER_TRACK = 50;
 const FOLLOWERS_PAGE_SIZE = 200;
 
@@ -877,7 +877,7 @@ export class SoundCloudWatcher {
 
   constructor(opts: SoundCloudWatcherConfig) {
     this.log = opts.logger ?? console.log;
-    this.myTracksLimit = opts.myTracksLimit ?? 10;
+    this.myTracksLimit = opts.myTracksLimit ?? 50;
     this.dormantDays = opts.dormantDays ?? 90;
     this.includeLinks = opts.includeLinks ?? true;  // Default: include links
     this.config = new Config(opts.clientId, opts.clientSecret, opts.username);
