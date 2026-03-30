@@ -3,6 +3,24 @@ import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 
+function sanitizeForOutput(s: string): string {
+  if (!s) return s;
+  return s
+    .replace(/\\/g, "\\\\")
+    .replace(/\*/g, "\\*")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)")
+    .replace(/~/g, "\\~")
+    .replace(/`/g, "\\`")
+    .replace(/>/g, "\\>")
+    .replace(/#/g, "\\#")
+    .replace(/\|/g, "\\|")
+    .replace(/_/g, "\\_")
+    .replace(/(^|\n)\//g, "$1\\/");
+}
+
 interface PluginConfig {
   clientId: string;
   clientSecret: string;
@@ -73,7 +91,7 @@ export default function register(api: any) {
 
 Already configured!
 
-- Username: ${config.username}
+- Username: ${sanitizeForOutput(config.username)}
 - Client ID: ${config.clientId.substring(0, 8)}...${config.clientId.slice(-4)}
 - Check interval: ${config.checkIntervalHours} hours
 

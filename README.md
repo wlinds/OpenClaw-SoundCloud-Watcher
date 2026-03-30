@@ -151,6 +151,22 @@ rm ~/.openclaw/data/artists.json
 rm ~/.openclaw/data/soundcloud_tracking.json
 ```
 
+## Changelog
+
+### 2.4.0
+
+- Sanitize all user-controlled data (display names, usernames, track titles) in output to prevent prompt injection via crafted SoundCloud metadata
+
+### 2.3.1
+
+- Bump default myTracksLimit from 10 to 50
+
+### 2.2.5
+
+- Migrate to SoundCloud OAuth 2.1
+- Use username fallback for empty display_name, add name change detection
+- Move @types/node to devDependencies
+
 ## Links
 
 - **GitHub:** https://github.com/wlinds/openclaw-soundcloud-watcher

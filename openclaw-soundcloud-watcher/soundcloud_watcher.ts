@@ -154,6 +154,32 @@ function parseTimestamp(ts: string | null | undefined): number {
   }
 }
 
+/**
+ * Sanitize user-controlled strings before embedding in markdown output.
+ * Prevents prompt injection via crafted SoundCloud display names, track titles, etc.
+ * Escapes markdown formatting characters and neutralizes slash-command patterns.
+ */
+function sanitize(s: string): string {
+  if (!s) return s;
+  // Replace markdown-significant characters with their escaped equivalents
+  let out = s
+    .replace(/\\/g, "\\\\")
+    .replace(/\*/g, "\\*")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)")
+    .replace(/~/g, "\\~")
+    .replace(/`/g, "\\`")
+    .replace(/>/g, "\\>")
+    .replace(/#/g, "\\#")
+    .replace(/\|/g, "\\|")
+    .replace(/_/g, "\\_");
+  // Neutralize lines starting with / that could look like agent slash-commands
+  out = out.replace(/(^|\n)\//g, "$1\\/");
+  return out;
+}
+
 function ensureDir(filepath: string): void {
   const dir = path.dirname(filepath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -649,20 +675,20 @@ class AccountWatcher {
 
             const newLikerNames = Object.entries(currentLikers)
               .filter(([uid]) => !prevLikers[uid])
-              .map(([, u]) => u.display_name || u.username);
+              .map(([, u]) => sanitize(u.display_name || u.username));
             const unlikerNames = Object.entries(prevLikers)
               .filter(([uid]) => !currentLikers[uid])
-              .map(([, u]) => u.display_name || u.username);
+              .map(([, u]) => sanitize(u.display_name || u.username));
 
             if (newLikerNames.length) {
               let names = newLikerNames.slice(0, 3).join(", ");
               if (newLikerNames.length > 3)
                 names += ` +${newLikerNames.length - 3} more`;
-              result.engagement.push(`**${names}** liked '${title}'`);
+              result.engagement.push(`**${names}** liked '${sanitize(title)}'`);
             }
             if (unlikerNames.length) {
               const names = unlikerNames.slice(0, 3).join(", ");
-              result.engagement.push(`${names} unliked '${title}'`);
+              result.engagement.push(`${names} unliked '${sanitize(title)}'`);
             }
           } else {
             stats.likers = prevLikers;
@@ -671,7 +697,7 @@ class AccountWatcher {
           const newReposts = currentReposts - (prev.reposts ?? 0);
           if (newReposts > 0) {
             result.engagement.push(
-              `'${title}' got ${newReposts} repost${newReposts > 1 ? "s" : ""}!`
+              `'${sanitize(title)}' got ${newReposts} repost${newReposts > 1 ? "s" : ""}!`
             );
           }
         } else {
@@ -786,7 +812,7 @@ class ArtistTracker {
 
   async add(username: string): Promise<string> {
     const user = await this.api.resolve(username);
-    if (!user) return `Could not find user: ${username}`;
+    if (!user) return `Could not find user: ${sanitize(username)}`;
 
     const tracks = await this.api.getTracks(user.id, ARTIST_ADD_LIMIT);
 
@@ -827,7 +853,7 @@ class ArtistTracker {
     };
     this.save();
 
-    return `Added ${user.full_name || username} (${followers.toLocaleString()} followers, ${tracks.length} tracks)`;
+    return `Added ${sanitize(user.full_name || username)} (${followers.toLocaleString()} followers, ${tracks.length} tracks)`;
   }
 
   remove(username: string): string {
@@ -837,10 +863,10 @@ class ArtistTracker {
         const name = artist.display_name ?? k;
         delete this.data.artists[k];
         this.save();
-        return `Removed ${name}`;
+        return `Removed ${sanitize(name)}`;
       }
     }
-    return `Artist '${username}' not found`;
+    return `Artist '${sanitize(username)}' not found`;
   }
 
   list(): string {
@@ -852,7 +878,7 @@ class ArtistTracker {
     for (const a of artists) {
       const dormant = this.isDormant(a);
       const status = dormant ? " [DORMANT]" : "";
-      lines.push(`${a.display_name} (@${a.username})${status}`);
+      lines.push(`${sanitize(a.display_name)} (@${sanitize(a.username)})${status}`);
       lines.push(
         `  ${(a.followers ?? 0).toLocaleString()} followers | ${a.track_count ?? 0} tracks`
       );
@@ -905,7 +931,7 @@ export class SoundCloudWatcher {
         : "Token: None"
     );
     if (account.data.my_account) {
-      lines.push(`Account: @${account.data.my_account.username}`);
+      lines.push(`Account: @${sanitize(account.data.my_account.username)}`);
       lines.push(
         `Followers: ${account.data.follower_count || Object.keys(account.data.my_followers).length}`
       );
@@ -950,9 +976,9 @@ export class SoundCloudWatcher {
     lines.push("\n--- Artist Releases ---");
     for (const r of releases) {
       if (this.includeLinks && r.url) {
-        lines.push(`  ${r.artist}: ${r.title} - ${r.url}`);
+        lines.push(`  ${sanitize(r.artist)}: ${sanitize(r.title)} - ${r.url}`);
       } else {
-        lines.push(`  ${r.artist}: ${r.title}`);
+        lines.push(`  ${sanitize(r.artist)}: ${sanitize(r.title)}`);
       }
     }
     if (!releases.length) lines.push("  No new releases");
@@ -997,7 +1023,7 @@ export class SoundCloudWatcher {
     const remaining = notif.users.length - users.length;
     
     // Helper: use display_name if set, otherwise fall back to @username
-    const getName = (u: UserInfo) => u.display_name?.trim() || `@${u.username}`;
+    const getName = (u: UserInfo) => sanitize(u.display_name?.trim() || `@${u.username}`);
     
     if (notif.type === 'new') {
       lines.push(`New follower${notif.users.length > 1 ? 's' : ''}:`);
@@ -1069,10 +1095,10 @@ export class SoundCloudWatcher {
       lines.push("**New Releases:**");
       for (const r of releases) {
         if (this.includeLinks && r.url) {
-          lines.push(`- **${r.artist}** dropped: ${r.title}`);
+          lines.push(`- **${sanitize(r.artist)}** dropped: ${sanitize(r.title)}`);
           lines.push(`  ${r.url}`);
         } else {
-          lines.push(`- **${r.artist}** dropped: ${r.title}`);
+          lines.push(`- **${sanitize(r.artist)}** dropped: ${sanitize(r.title)}`);
         }
       }
       lines.push("");
